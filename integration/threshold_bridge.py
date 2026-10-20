@@ -24,9 +24,10 @@ import math
 from collections import deque
 
 import cv2
-import mediapipe as mp
+import numpy as np
 
 from common.events import DEFAULT_PORT, EventSender, EventType, now
+from perception.landmarks import create_hand_tracker, extract_landmarks
 
 PALM = (0, 5, 9, 13, 17)  # wrist + finger bases: a stable palm center
 
@@ -66,9 +67,9 @@ def main(argv=None):
     if not cap.isOpened():
         raise SystemExit("could not open camera (check camera permission for your terminal)")
     sender = EventSender(port=a.port, source="velocity_threshold")
-    hands = mp.solutions.hands.Hands(max_num_hands=1, model_complexity=0,
-                                     min_detection_confidence=0.6, min_tracking_confidence=0.5)
+    tracker = create_hand_tracker()
     track: deque = deque()
+    last_ts = -1  # the tracker needs strictly increasing timestamps (ms)
     cooldown_until = 0.0
     last = None
     print(f"sending to 127.0.0.1:{a.port}; press q in the preview window (or Ctrl-C) to quit")
@@ -79,15 +80,14 @@ def main(argv=None):
             if not ok:
                 break
             frame = cv2.flip(frame, 1)  # mirror: your left is image left
-            result = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            last_ts = max(int(t_capture * 1000), last_ts + 1)
+            lm = extract_landmarks(tracker, cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), last_ts)
             t_landmarks = now()
 
-            if result.multi_hand_landmarks:
-                lm = result.multi_hand_landmarks[0].landmark
-                cx = sum(lm[i].x for i in PALM) / len(PALM)
-                cy = sum(lm[i].y for i in PALM) / len(PALM)
-                hand_len = math.hypot(lm[9].x - lm[0].x, lm[9].y - lm[0].y) or 1e-3
-                track.append((t_capture, cx, cy, hand_len))
+            if lm is not None:
+                cx, cy = lm[list(PALM), :2].mean(axis=0)
+                hand_len = float(np.hypot(*(lm[9, :2] - lm[0, :2]))) or 1e-3
+                track.append((t_capture, float(cx), float(cy), hand_len))
             else:
                 track.clear()
             while track and t_capture - track[0][0] > a.window:
@@ -105,9 +105,10 @@ def main(argv=None):
                 print(f"{kind.value:5s} conf={conf:.2f}  pipeline {1000 * (now() - t_capture):.0f} ms")
 
             if not a.no_preview:
-                if result.multi_hand_landmarks:
-                    mp.solutions.drawing_utils.draw_landmarks(
-                        frame, result.multi_hand_landmarks[0], mp.solutions.hands.HAND_CONNECTIONS)
+                if lm is not None:
+                    h, w = frame.shape[:2]
+                    for x, y, _ in lm:
+                        cv2.circle(frame, (int(x * w), int(y * h)), 4, (0, 255, 0), -1)
                 if last and t_capture - last[2] < 0.6:
                     cv2.putText(frame, f"{last[0]} {last[1]:.2f}", (20, 50),
                                 cv2.FONT_HERSHEY_SIMPLEX, 1.4, (40, 200, 40), 3)
@@ -118,7 +119,7 @@ def main(argv=None):
         pass
     finally:
         cap.release()
-        hands.close()
+        tracker.close()
         sender.close()
         cv2.destroyAllWindows()
 
