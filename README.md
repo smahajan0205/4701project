@@ -22,6 +22,9 @@ python3.12 -m venv .venv
 | `game/` | The runner: deterministic seeded world, pygame renderer, keyboard/gesture/autopilot input, JSONL logging, replay, latency report, latency-budget sweep. |
 | `integration/threshold_bridge.py` | Webcam -> MediaPipe Hands -> velocity threshold -> events. Go/no-go latency check and the hand-tuned baseline. |
 | `integration/subway_bridge.py` | Events -> Subway Surfers (browser arrow keys or Android `adb` swipes). |
+| `study/` | Study harness: counterbalanced condition order, fixed seeds, practice + timed trials, NASA-TLX, resume, summary table. |
+| `scroll/` | Scrolling prototype: the same events drive a document viewer with a target-finding task. |
+| `docs/` | [Event interface](docs/event_interface.md), [game + logs + latency results](docs/game.md), [running study sessions](docs/study.md). |
 | `tests/` | pytest suite. |
 
 ## Quick start
@@ -33,6 +36,9 @@ python -m integration.threshold_bridge           # terminal 2: webcam velocity b
 python -m game.latency_report logs/*.jsonl       # where the milliseconds go
 python -m game.replay logs/<session>.jsonl       # verify a session reproduces exactly
 python -m game.sweep                             # simulated latency budget
+python -m study.run --participant P01 --session 1  # one study session (see docs/study.md)
+python -m scroll --input gesture                 # scrolling prototype
+python -m integration.subway_bridge --backend keys   # gestures -> browser Subway Surfers
 ```
 
 ## Sending events from a classifier
