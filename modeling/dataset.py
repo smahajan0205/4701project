@@ -57,7 +57,8 @@ class GestureDataset(Dataset):
 
     Each item is (features_tensor, label_idx) where features_tensor has
     shape [window, feat_dim].  Long recordings are sliced into overlapping
-    windows; short ones are zero-padded on the right.
+    windows; short ones are zero-padded on the left, so that models reading
+    the final timestep (GestureLSTM) see real frames rather than padding.
     """
 
     def __init__(
@@ -86,7 +87,7 @@ class GestureDataset(Dataset):
 
             if T < window:
                 pad = np.zeros((window - T, F), dtype=np.float32)
-                self._items.append((np.concatenate([feats, pad], axis=0), label_idx))
+                self._items.append((np.concatenate([pad, feats], axis=0), label_idx))
             else:
                 for start in range(0, T - window + 1, stride):
                     self._items.append((feats[start: start + window], label_idx))

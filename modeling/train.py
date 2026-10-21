@@ -11,11 +11,12 @@ The best validation-accuracy checkpoint is named {model}_best.pt.
 from __future__ import annotations
 
 import argparse
+import random
 from pathlib import Path
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 
 from modeling.dataset import GestureDataset, load_recordings
 from modeling.features import extract_features
@@ -27,7 +28,7 @@ def _train_epoch(model, loader, optimizer, criterion, device):
     total_loss = correct = n = 0
     for x, y in loader:
         x = x.to(device)
-        y = torch.tensor(y, dtype=torch.long, device=device)
+        y = torch.as_tensor(y, dtype=torch.long, device=device)
         optimizer.zero_grad()
         logits = model(x)
         loss = criterion(logits, y)
@@ -45,12 +46,23 @@ def _eval_epoch(model, loader, criterion, device):
     total_loss = correct = n = 0
     for x, y in loader:
         x = x.to(device)
-        y = torch.tensor(y, dtype=torch.long, device=device)
+        y = torch.as_tensor(y, dtype=torch.long, device=device)
         logits = model(x)
         total_loss += criterion(logits, y).item() * len(y)
         correct += (logits.argmax(1) == y).sum().item()
         n += len(y)
     return total_loss / n, correct / n
+
+
+def split_by_recording(records: list[dict], val_frac: float,
+                       seed: int = 42) -> tuple[list[dict], list[dict]]:
+    """Hold out whole recordings for validation (seeded, deterministic)."""
+    if len(records) < 2:
+        raise SystemExit("need at least 2 recordings to make a train/val split")
+    shuffled = list(records)
+    random.Random(seed).shuffle(shuffled)
+    n_val = min(len(shuffled) - 1, max(1, int(val_frac * len(shuffled))))
+    return shuffled[n_val:], shuffled[:n_val]
 
 
 def _build_model(name: str, window: int) -> nn.Module:
@@ -75,7 +87,7 @@ def main(argv=None):
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--batch", type=int, default=32)
     p.add_argument("--val-frac", type=float, default=0.15,
-                   help="fraction of dataset held out for validation")
+                   help="fraction of recordings held out for validation")
     p.add_argument("--out", default="checkpoints",
                    help="directory for saved model checkpoints")
     a = p.parse_args(argv)
@@ -88,14 +100,16 @@ def main(argv=None):
         raise SystemExit(f"no .npz files found in {a.data!r} — record gestures first")
     print(f"loaded {len(records)} recordings ({a.data})")
 
-    dataset = GestureDataset(records, window=a.window, stride=a.stride,
+    # Split by recording, not by window: overlapping windows from one clip
+    # would otherwise land on both sides and inflate validation accuracy.
+    train_recs, val_recs = split_by_recording(records, a.val_frac, seed=42)
+    train_ds = GestureDataset(train_recs, window=a.window, stride=a.stride,
                               feature_fn=extract_features)
-    print(f"dataset: {len(dataset)} windows")
+    val_ds = GestureDataset(val_recs, window=a.window, stride=a.stride,
+                            feature_fn=extract_features)
+    print(f"train: {len(train_recs)} recordings / {len(train_ds)} windows  "
+          f"val: {len(val_recs)} recordings / {len(val_ds)} windows")
 
-    n_val = max(1, int(a.val_frac * len(dataset)))
-    n_train = len(dataset) - n_val
-    g = torch.Generator().manual_seed(42)
-    train_ds, val_ds = random_split(dataset, [n_train, n_val], generator=g)
     train_loader = DataLoader(train_ds, batch_size=a.batch, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=a.batch)
 

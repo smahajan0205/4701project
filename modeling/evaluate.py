@@ -4,7 +4,7 @@ Provides:
     predict_all()           — collect all predictions from a DataLoader
     confusion_matrix()      — compute [C, C] confusion matrix
     per_class_f1()          — per-class F1 scores from confusion matrix
-    accuracy_vs_fraction()  — LSTM accuracy at 25/50/75/100% of gesture window
+    accuracy_vs_fraction()  — LSTM accuracy at 25/50/75/100% of each gesture clip
     run_louo()              — full leave-one-user-out evaluation loop
 
 CLI usage:
@@ -20,7 +20,13 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from modeling.dataset import GESTURE_CLASSES, GestureDataset, load_recordings, louo_splits
+from modeling.dataset import (
+    CLASS_TO_IDX,
+    GESTURE_CLASSES,
+    GestureDataset,
+    load_recordings,
+    louo_splits,
+)
 from modeling.features import extract_features
 from modeling.models import GestureLSTM
 
@@ -69,24 +75,28 @@ def per_class_f1(cm: np.ndarray) -> list[float]:
 @torch.no_grad()
 def accuracy_vs_fraction(
     model: GestureLSTM,
-    loader: DataLoader,
+    records: list[dict],
     device: torch.device,
     fractions: tuple[float, ...] = FRACTIONS,
+    feature_fn=extract_features,
 ) -> dict[float, float]:
-    """Accuracy of the LSTM when shown only the first *frac* of each window.
+    """Accuracy of the LSTM when shown only the first *frac* of each clip.
 
-    Sweeping fractions traces the accuracy-versus-latency curve from the paper.
+    Each recording is one segmented gesture starting at onset, so the prefix
+    is measured from the start of the gesture rather than from an arbitrary
+    sliding-window offset.  Sweeping fractions traces the
+    accuracy-versus-latency curve from the paper.
     """
     model.eval()
-    results: dict[float, tuple[int, int]] = {f: (0, 0) for f in fractions}
-    for x, y in loader:
-        x = x.to(device)
-        y_arr = y.numpy() if isinstance(y, torch.Tensor) else np.asarray(y)
+    correct = {f: 0 for f in fractions}
+    for rec in records:
+        x = torch.as_tensor(feature_fn(rec["landmarks"]), device=device).unsqueeze(0)
+        label = CLASS_TO_IDX[rec["label"]]
         for frac in fractions:
-            preds = model.forward_partial(x, frac).argmax(1).cpu().numpy()
-            correct, total = results[frac]
-            results[frac] = (correct + (preds == y_arr).sum(), total + len(y_arr))
-    return {f: c / t if t else 0.0 for f, (c, t) in results.items()}
+            pred = model.forward_partial(x, frac).argmax(1).item()
+            correct[frac] += int(pred == label)
+    n = len(records)
+    return {f: correct[f] / n if n else 0.0 for f in fractions}
 
 
 def run_louo(
@@ -125,7 +135,7 @@ def run_louo(
         for _ in range(epochs):
             for x, y in train_loader:
                 x = x.to(device)
-                y = torch.tensor(y, dtype=torch.long, device=device)
+                y = torch.as_tensor(y, dtype=torch.long, device=device)
                 optimizer.zero_grad()
                 loss = criterion(model(x), y)
                 loss.backward()
@@ -135,7 +145,7 @@ def run_louo(
         cm = confusion_matrix(y_true, y_pred)
         f1s = per_class_f1(cm)
         acc = float((y_true == y_pred).mean()) if len(y_true) else 0.0
-        frac_accs = accuracy_vs_fraction(model, test_loader, device)
+        frac_accs = accuracy_vs_fraction(model, test_recs, device)
 
         print(f"  accuracy: {acc:.3f}")
         print("  per-class F1: " + "  ".join(
@@ -183,7 +193,7 @@ def main(argv=None):
         cm = confusion_matrix(y_true, y_pred)
         f1s = per_class_f1(cm)
         acc = float((y_true == y_pred).mean()) if len(y_true) else 0.0
-        frac_accs = accuracy_vs_fraction(model, loader, device)
+        frac_accs = accuracy_vs_fraction(model, records, device)
         print(f"accuracy: {acc:.3f}")
         print("per-class F1:")
         for cls, f in zip(GESTURE_CLASSES, f1s):

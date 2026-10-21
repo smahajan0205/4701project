@@ -60,6 +60,9 @@ def test_gesture_dataset_short_recording_padded():
     assert len(ds) == 1
     x, _ = ds[0]
     assert x.shape == (20, FEAT_DIM)
+    # padding goes on the left so the final timestep is real data
+    assert torch.all(x[:10] == 0)
+    assert torch.any(x[-1] != 0)
 
 
 def test_gesture_dataset_label_index():
@@ -80,6 +83,18 @@ def test_louo_splits_hold_out_every_user():
     for train, test, user in splits:
         assert all(r["user_id"] != user for r in train)
         assert all(r["user_id"] == user for r in test)
+
+
+def test_split_by_recording_is_disjoint():
+    from modeling.train import split_by_recording
+
+    records = [_make_record(f"u{i % 3}", c) for i in range(4) for c in GESTURE_CLASSES]
+    for i, r in enumerate(records):
+        r["path"] = f"rec_{i}"
+    train, val = split_by_recording(records, val_frac=0.2)
+    assert len(train) + len(val) == len(records)
+    assert len(val) == 4
+    assert not {r["path"] for r in train} & {r["path"] for r in val}
 
 
 # ----------------------------------------------------------------- models
@@ -123,12 +138,8 @@ def test_per_class_f1_perfect():
 
 
 def test_accuracy_vs_fraction_keys():
-    from torch.utils.data import DataLoader
-
-    records = [_make_record("u1", c) for c in GESTURE_CLASSES]
-    ds = GestureDataset(records, window=20, feature_fn=extract_features)
-    loader = DataLoader(ds, batch_size=4)
+    records = [_make_record("u1", c, T=T) for c, T in zip(GESTURE_CLASSES, (8, 15, 25, 40, 60))]
     model = GestureLSTM()
-    result = accuracy_vs_fraction(model, loader, torch.device("cpu"))
+    result = accuracy_vs_fraction(model, records, torch.device("cpu"))
     assert set(result.keys()) == {0.25, 0.5, 0.75, 1.0}
     assert all(0.0 <= v <= 1.0 for v in result.values())
