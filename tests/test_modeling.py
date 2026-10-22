@@ -24,6 +24,8 @@ from modeling.models import BaselineMLP, GestureLSTM, NUM_CLASSES
 def _make_record(user: str, label: str, T: int = 25) -> dict:
     return {
         "landmarks": np.random.randn(T, 21, 3).astype(np.float32),
+        "wrist_xy": np.random.rand(T, 2).astype(np.float32),
+        "hand_scale": np.full(T, 0.1, dtype=np.float32),
         "label": label,
         "user_id": user,
         "timestamps_ms": np.arange(T, dtype=np.float32) * 33.0,
@@ -33,17 +35,47 @@ def _make_record(user: str, label: str, T: int = 25) -> dict:
 
 # ----------------------------------------------------------------- features
 
+def _static_wrist(T: int, x: float = 0.5, y: float = 0.5, scale: float = 0.1):
+    wrist = np.tile(np.array([[x, y]], dtype=np.float32), (T, 1))
+    return wrist, np.full(T, scale, dtype=np.float32)
+
+
 def test_extract_features_shape():
     lm = np.ones((30, 21, 3), dtype=np.float32)
-    feats = extract_features(lm)
+    feats = extract_features(lm, *_static_wrist(30))
     assert feats.shape == (30, FEAT_DIM)
 
 
 def test_velocity_zero_for_static_hand():
     lm = np.ones((10, 21, 3), dtype=np.float32)
-    feats = extract_features(lm)
-    velocity = feats[:, 63:]
-    assert np.allclose(velocity[1:], 0.0)
+    feats = extract_features(lm, *_static_wrist(10))
+    assert np.allclose(feats[1:, 63:], 0.0)  # landmark vel, wrist disp, wrist vel
+
+
+def test_wrist_features_separate_left_and_right_swipes():
+    # Identical hand shape; only the wrist translates. Wrist-centred landmarks
+    # alone cannot tell these apart, the wrist features must.
+    T = 10
+    lm = np.ones((T, 21, 3), dtype=np.float32)
+    xs = np.linspace(0.3, 0.7, T, dtype=np.float32)
+    scale = np.full(T, 0.1, dtype=np.float32)
+    right = extract_features(lm, np.stack([xs, np.full(T, 0.5)], 1), scale)
+    left = extract_features(lm, np.stack([xs[::-1], np.full(T, 0.5)], 1), scale)
+    assert np.allclose(right[:, :126], left[:, :126])
+    assert right[-1, 126] > 0 > left[-1, 126]          # x displacement sign
+    assert np.isclose(right[-1, 126], 4.0)             # 0.4 image units / 0.1 hand length
+
+
+def test_wrist_features_invariant_to_camera_distance():
+    T = 10
+    lm = np.ones((T, 21, 3), dtype=np.float32)
+    xs = np.linspace(0.3, 0.7, T, dtype=np.float32)
+    near = extract_features(lm, np.stack([xs, np.full(T, 0.5)], 1),
+                            np.full(T, 0.2, dtype=np.float32))
+    # twice as far: half the image-space motion and half the hand size
+    far = extract_features(lm, np.stack([xs / 2, np.full(T, 0.25)], 1),
+                           np.full(T, 0.1, dtype=np.float32))
+    assert np.allclose(near, far, atol=1e-5)
 
 
 # ----------------------------------------------------------------- dataset

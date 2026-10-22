@@ -90,7 +90,8 @@ def accuracy_vs_fraction(
     model.eval()
     correct = {f: 0 for f in fractions}
     for rec in records:
-        x = torch.as_tensor(feature_fn(rec["landmarks"]), device=device).unsqueeze(0)
+        feats = feature_fn(rec["landmarks"], rec["wrist_xy"], rec["hand_scale"])
+        x = torch.as_tensor(feats, device=device).unsqueeze(0)
         label = CLASS_TO_IDX[rec["label"]]
         for frac in fractions:
             pred = model.forward_partial(x, frac).argmax(1).item()

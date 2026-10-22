@@ -119,7 +119,7 @@ def main(argv=None):
 
     out_dir = Path(a.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    best_val_acc = 0.0
+    best_val_acc = -1.0  # so epoch 1 always saves, even at 0% val acc
 
     for epoch in range(1, a.epochs + 1):
         tr_loss, tr_acc = _train_epoch(model, train_loader, optimizer, criterion, device)
