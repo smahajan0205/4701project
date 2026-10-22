@@ -26,11 +26,7 @@ def main():
     previous_timestamp = -1
     with open(output_file, "w", newline="") as file:
         writer = csv.writer(file)
-        header = [
-            "timestamp_ms",
-            "wrist_x",
-            "wrist_y"
-        ]
+        header = ["timestamp_ms", "wrist_x", "wrist_y", "hand_scale"]
         for i in range(21):
             header += [
                 f"landmark_{i}_x",
@@ -74,12 +70,14 @@ def main():
 
                     wrist_x = landmarks[0, 0]
                     wrist_y = landmarks[0, 1]
+                    hand_scale = np.linalg.norm(landmarks[9, :2] - landmarks[0, :2])
 
                     row = [
                         timestamp_ms,
                         wrist_x,
                         wrist_y,
-                        *normalized.flatten()
+                        hand_scale,
+                        *normalized.flatten(),
                     ]
 
                     writer.writerow(row)
