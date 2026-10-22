@@ -8,7 +8,7 @@ Provides:
     run_louo()              — full leave-one-user-out evaluation loop
 
 CLI usage:
-    python -m modeling.evaluate --data data/gestures --checkpoint checkpoints/lstm_best.pt
+    python -m modeling.evaluate --data data/pilot --checkpoint checkpoints/lstm_best.pt
 """
 
 from __future__ import annotations
@@ -173,7 +173,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data", required=True,
-                   help="directory of .npz gesture recordings")
+                   help="directory of recorder CSVs (perception/record_gestures.py)")
     p.add_argument("--checkpoint",
                    help="path to a saved .pt checkpoint (skips LOUO, runs single eval)")
     p.add_argument("--window", type=int, default=20)

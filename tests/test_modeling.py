@@ -7,6 +7,7 @@ import torch
 from modeling.dataset import (
     CLASS_TO_IDX,
     GESTURE_CLASSES,
+    LANDMARK_COLS,
     GestureDataset,
     load_recordings,
     louo_splits,
@@ -103,6 +104,34 @@ def test_gesture_dataset_label_index():
         ds = GestureDataset(records, window=20, feature_fn=extract_features)
         _, y = ds[0]
         assert y == CLASS_TO_IDX[label]
+
+
+def _write_clip(path, detected):
+    import csv
+    header = ["timestamp_ms", "wrist_x", "wrist_y", "hand_scale", "hand_detected"] + LANDMARK_COLS
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        for t, d in enumerate(detected):
+            if d:
+                w.writerow([t * 33, 0.5 + 0.01 * t, 0.5, 0.1, 1] + [0.0] * 63)
+            else:
+                w.writerow([t * 33, "", "", "", 0] + [""] * 63)
+
+
+def test_load_recordings_reads_recorder_csvs(tmp_path):
+    _write_clip(tmp_path / "sanya_up_001.csv", [0, 1, 1, 0, 1])
+    _write_clip(tmp_path / "sohan_left_002.csv", [1, 1, 1])
+    _write_clip(tmp_path / "tanya_down_001.csv", [0, 0, 0])  # no hand: skipped
+    with pytest.warns(UserWarning, match="tanya_down_001"):
+        records = load_recordings(tmp_path)
+    by_user = {r["user_id"]: r for r in records}
+    assert set(by_user) == {"sanya", "sohan"}
+    up = by_user["sanya"]
+    assert up["label"] == "jump"                         # recorder name -> game event
+    assert up["landmarks"].shape == (3, 21, 3)           # undetected frames dropped
+    assert up["wrist_xy"].shape == (3, 2) and up["hand_scale"].shape == (3,)
+    assert np.allclose(up["timestamps_ms"], [33, 66, 132])
 
 
 def test_louo_splits_hold_out_every_user():

@@ -1,8 +1,8 @@
 """Training script for gesture classifiers.
 
 Usage:
-    python -m modeling.train --data data/gestures --model lstm
-    python -m modeling.train --data data/gestures --model mlp --epochs 50
+    python -m modeling.train --data data/pilot --model lstm
+    python -m modeling.train --data data/pilot --model mlp --epochs 50
 
 Checkpoints are saved to --out (default: checkpoints/).
 The best validation-accuracy checkpoint is named {model}_best.pt.
@@ -77,7 +77,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data", required=True,
-                   help="directory of .npz gesture recordings")
+                   help="directory of recorder CSVs (perception/record_gestures.py)")
     p.add_argument("--model", choices=["lstm", "mlp"], default="lstm")
     p.add_argument("--window", type=int, default=20,
                    help="frames per sample (default 20 ≈ 0.67 s at 30 fps)")
@@ -97,7 +97,7 @@ def main(argv=None):
 
     records = load_recordings(a.data)
     if not records:
-        raise SystemExit(f"no .npz files found in {a.data!r} — record gestures first")
+        raise SystemExit(f"no usable clips in {a.data!r} — record gestures first")
     print(f"loaded {len(records)} recordings ({a.data})")
 
     # Split by recording, not by window: overlapping windows from one clip

@@ -1,16 +1,19 @@
-"""Gesture dataset: loading .npz recordings, windowing, and LOUO splits.
+"""Gesture dataset: loading recorded clips, windowing, and LOUO splits.
 
-Expected .npz file format (produced by perception/record_gestures.py):
-    landmarks     : float32 [T, 21, 3]  - normalized hand landmarks per frame
-    wrist_xy      : float32 [T, 2]      - raw wrist (landmark 0) x, y in image coords
-    hand_scale    : float32 [T]         - raw wrist-to-middle-MCP distance in image coords
-    label         : str                 - one of GESTURE_CLASSES
-    user_id       : str
-    timestamps_ms : float32 [T]         - milliseconds from session start
+Reads the per-clip CSVs written by perception/record_gestures.py, named
+{user}_{gesture}_{rep:03d}.csv, one row per frame with columns:
+    timestamp_ms, wrist_x, wrist_y, hand_scale, hand_detected,
+    landmark_{0..20}_{x,y,z}
+
+Frames with hand_detected == 0 are dropped.  The recorder's gesture names
+are mapped onto the game's event names (up -> jump, down -> roll), matching
+common/events.py.
 """
 
 from __future__ import annotations
 
+import csv
+import warnings
 from pathlib import Path
 from typing import Iterator
 
@@ -22,30 +25,55 @@ from modeling.features import extract_features
 
 GESTURE_CLASSES = ["left", "right", "jump", "roll", "idle"]
 CLASS_TO_IDX = {c: i for i, c in enumerate(GESTURE_CLASSES)}
-REQUIRED_FIELDS = ("landmarks", "wrist_xy", "hand_scale", "label", "user_id", "timestamps_ms")
+RECORDER_TO_CLASS = {"left": "left", "right": "right", "up": "jump",
+                     "down": "roll", "idle": "idle"}
+LANDMARK_COLS = [f"landmark_{i}_{a}" for i in range(21) for a in "xyz"]
+MIN_FRAMES = 2
+
+
+def load_clip(path: str | Path) -> dict | None:
+    """Load one recorder CSV.  Returns None if fewer than MIN_FRAMES frames
+    had a detected hand."""
+    path = Path(path)
+    user_id, gesture, _rep = path.stem.rsplit("_", 2)
+    if gesture not in RECORDER_TO_CLASS:
+        raise ValueError(f"{path.name}: unknown gesture {gesture!r}")
+
+    with open(path, newline="") as f:
+        rows = [r for r in csv.DictReader(f) if r["hand_detected"] == "1"]
+    if len(rows) < MIN_FRAMES:
+        return None
+
+    def col(names):
+        return np.array([[float(r[n]) for n in names] for r in rows], dtype=np.float32)
+
+    return {
+        "landmarks": col(LANDMARK_COLS).reshape(-1, 21, 3),
+        "wrist_xy": col(["wrist_x", "wrist_y"]),
+        "hand_scale": col(["hand_scale"])[:, 0],
+        "timestamps_ms": col(["timestamp_ms"])[:, 0],
+        "label": RECORDER_TO_CLASS[gesture],
+        "user_id": user_id,
+        "path": path,
+    }
 
 
 def load_recordings(data_dir: str | Path) -> list[dict]:
-    """Load all .npz gesture recordings from *data_dir*.
+    """Load all recorder CSVs from *data_dir*, skipping clips with no hand.
 
-    Returns a list of dicts with keys: landmarks, wrist_xy, hand_scale,
-    label, user_id, timestamps_ms, path.
+    Returns a list of dicts with keys: landmarks [T,21,3], wrist_xy [T,2],
+    hand_scale [T], timestamps_ms [T], label, user_id, path.
     """
-    records = []
-    for path in sorted(Path(data_dir).glob("*.npz")):
-        d = np.load(path, allow_pickle=True)
-        missing = [k for k in REQUIRED_FIELDS if k not in d.files]
-        if missing:
-            raise ValueError(f"{path.name} is missing fields {missing}")
-        records.append({
-            "landmarks": d["landmarks"].astype(np.float32),
-            "wrist_xy": d["wrist_xy"].astype(np.float32),
-            "hand_scale": d["hand_scale"].astype(np.float32),
-            "label": str(d["label"]),
-            "user_id": str(d["user_id"]),
-            "timestamps_ms": d["timestamps_ms"].astype(np.float32),
-            "path": path,
-        })
+    records, empty = [], []
+    for path in sorted(Path(data_dir).glob("*.csv")):
+        rec = load_clip(path)
+        if rec is None:
+            empty.append(path.name)
+        else:
+            records.append(rec)
+    if empty:
+        warnings.warn(f"skipped {len(empty)} clip(s) with < {MIN_FRAMES} detected "
+                      f"frames: {', '.join(empty[:5])}{' ...' if len(empty) > 5 else ''}")
     return records
 
 
