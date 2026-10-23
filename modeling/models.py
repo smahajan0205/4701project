@@ -18,9 +18,14 @@ NUM_CLASSES = len(GESTURE_CLASSES)
 
 
 class BaselineMLP(nn.Module):
-    """Fixed-window MLP: flatten window × features, then classify."""
+    """Fixed-window MLP: flatten window × features, then classify.
 
-    def __init__(self, window: int = 20, feat_dim: int = FEAT_DIM, hidden: int = 256):
+    hidden=100 matches GestureLSTM's default parameter count (~266k) at the
+    default window of 20, so the comparison isolates waiting-for-the-window
+    vs. classifying a prefix rather than model size.
+    """
+
+    def __init__(self, window: int = 20, feat_dim: int = FEAT_DIM, hidden: int = 100):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(window * feat_dim, hidden),

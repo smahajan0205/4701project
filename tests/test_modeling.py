@@ -167,6 +167,13 @@ def test_baseline_mlp_output_shape():
     assert out.shape == (8, NUM_CLASSES)
 
 
+def test_mlp_and_lstm_parameter_budgets_match():
+    # The proposal compares models at matched parameter counts.
+    n_mlp = sum(p.numel() for p in BaselineMLP(window=20).parameters())
+    n_lstm = sum(p.numel() for p in GestureLSTM().parameters())
+    assert abs(n_mlp - n_lstm) / n_lstm < 0.01
+
+
 def test_gesture_lstm_output_shape():
     model = GestureLSTM()
     x = torch.randn(8, 20, FEAT_DIM)
